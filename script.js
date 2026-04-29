@@ -4,7 +4,7 @@ let currentTab = 'user';
 let map = null;
 let marker = null;
 
-// Default credentials (in production, use proper backend auth)
+// Default credentials
 const USERS = {
     user: { email: 'user@garbagereport.com', password: 'user123', role: 'user', name: 'Resident User' },
     admin: { email: 'admin@garbagereport.com', password: 'admin123', role: 'admin', name: 'City Admin' }
@@ -21,10 +21,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Image preview
     document.getElementById('image').addEventListener('change', previewImage);
+    
+    // Fallback map initialization
+    setTimeout(initFallbackMap, 1000);
 });
 
 function initAuth() {
-    // Check if already logged in
     const savedUser = localStorage.getItem('currentUser');
     if (savedUser) {
         currentUser = JSON.parse(savedUser);
@@ -49,7 +51,7 @@ function loginDemo(role) {
     const user = USERS[role];
     document.getElementById('email').value = user.email;
     document.getElementById('password').value = user.password;
-    handleLogin(event);
+    handleLogin(new Event('submit'));
 }
 
 function handleLogin(e) {
@@ -64,7 +66,7 @@ function handleLogin(e) {
         localStorage.setItem('currentUser', JSON.stringify(user));
         showDashboard();
     } else {
-        alert('Invalid credentials!');
+        alert('❌ Invalid credentials!');
     }
 }
 
@@ -77,7 +79,6 @@ function showDashboard() {
     } else {
         document.getElementById('user-dashboard').classList.add('active');
         document.getElementById('user-name').textContent = currentUser.name;
-        initMap();
         loadUserReports();
     }
 }
@@ -87,87 +88,119 @@ function logout() {
     localStorage.removeItem('currentUser');
     document.querySelectorAll('.screen').forEach(screen => screen.classList.remove('active'));
     document.getElementById('login-screen').classList.add('active');
-    if (map) {
-        google.maps.event.clearInstanceListeners(window);
-    }
 }
 
-// Map Functions
-function initMap() {
-    const defaultLocation = { lat: 12.9716, lng: 77.5946 }; // Bengaluru default
+// 🗺️ FALLBACK MAP (No API Key needed)
+function initFallbackMap() {
+    const mapContainer = document.getElementById('map');
+    const defaultLocation = { lat: 12.9716, lng: 77.5946 }; // Bengaluru
     
-    map = new google.maps.Map(document.getElementById('map'), {
-        zoom: 12,
-        center: defaultLocation,
-        mapTypeId: 'roadmap'
-    });
-    
-    // Click to set location
-    map.addListener('click', function(event) {
-        const lat = event.latLng.lat();
-        const lng = event.latLng.lng();
-        
-        document.getElementById('lat').value = lat;
-        document.getElementById('lng').value = lng;
-        document.getElementById('location-text').value = `Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}`;
-        
-        if (marker) marker.setMap(null);
-        marker = new google.maps.Marker({
-            position: { lat, lng },
-            map: map,
-            title: 'Garbage Location'
-        });
-        
-        map.setCenter({ lat, lng });
-        map.setZoom(16);
-    });
+    // Create static map background
+    mapContainer.innerHTML = `
+        <div style="height:100%; background: linear-gradient(45deg, #e3f2fd, #f3e5f5); border-radius:12px; display:flex; align-items:center; justify-content:center; flex-direction:column; cursor:pointer;" onclick="setDefaultLocation()">
+            <i class="fas fa-map-marked-alt" style="font-size:4rem; color:#4CAF50; margin-bottom:15px;"></i>
+            <div style="text-align:center; color:#666;">
+                <div>👆 Click here to set location</div>
+                <div style="font-size:0.9rem; margin-top:5px;">Bengaluru Default: ${defaultLocation.lat.toFixed(4)}, ${defaultLocation.lng.toFixed(4)}</div>
+            </div>
+        </div>
+    `;
 }
 
+function setDefaultLocation() {
+    const defaultLocation = { lat: 12.9716, lng: 77.5946 };
+    document.getElementById('lat').value = defaultLocation.lat;
+    document.getElementById('lng').value = defaultLocation.lng;
+    document.getElementById('location-text').value = `Bengaluru: ${defaultLocation.lat.toFixed(4)}, ${defaultLocation.lng.toFixed(4)}`;
+    
+    // Visual feedback
+    const mapContainer = document.getElementById('map');
+    mapContainer.innerHTML = `
+        <div style="height:100%; background:#d4edda; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-direction:column;">
+            <i class="fas fa-map-marker-alt" style="font-size:3rem; color:#28a745;"></i>
+            <div style="color:#155724; font-weight:600; margin-top:10px;">✅ Location Set!</div>
+            <div style="color:#666; font-size:0.9rem;">${document.getElementById('location-text').value}</div>
+        </div>
+    `;
+}
+
+// 🖼️ Image Preview
+let imageFile = null;
 function previewImage(e) {
     const file = e.target.files[0];
-    const preview = document.getElementById('image-preview');
+    imageFile = file;
     
     if (file) {
         const reader = new FileReader();
         reader.onload = function(e) {
-            preview.innerHTML = `<img src="${e.target.result}" alt="Preview">`;
+            const preview = document.getElementById('image-preview');
+            preview.innerHTML = `<img src="${e.target.result}" alt="Preview" style="border-radius:12px;">`;
         };
         reader.readAsDataURL(file);
     }
 }
 
+// ✅ FIXED SUBMIT FUNCTION
 function handleReportSubmit(e) {
     e.preventDefault();
+    console.log('Submit clicked!'); // Debug log
     
+    // Validate location
     if (!document.getElementById('lat').value) {
-        alert('Please select location on map');
+        alert('⚠️ Please set location first (click on map)');
         return;
     }
     
-    const formData = new FormData(e.target);
+    // Get form data
+    const description = document.getElementById('description').value.trim();
+    if (!description) {
+        alert('⚠️ Please add description');
+        return;
+    }
+    
+    // Create report with image handling
     const report = {
         id: Date.now(),
         userId: currentUser.email,
         userName: currentUser.name,
-        lat: formData.get('lat'),
-        lng: formData.get('lng'),
-        description: formData.get('description'),
-        image: document.getElementById('image').files[0] ? URL.createObjectURL(formData.get('image')) : null,
+        lat: parseFloat(document.getElementById('lat').value),
+        lng: parseFloat(document.getElementById('lng').value),
+        description: description,
         status: 'pending',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
     };
     
+    // Handle image - store as base64 for persistence
+    if (imageFile) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            report.image = e.target.result; // Base64 image
+            saveReport(report);
+        };
+        reader.readAsDataURL(imageFile);
+    } else {
+        saveReport(report);
+    }
+}
+
+function saveReport(report) {
     const reports = JSON.parse(localStorage.getItem('reports') || '[]');
     reports.unshift(report);
     localStorage.setItem('reports', JSON.stringify(reports));
     
-    alert('Report submitted successfully!');
-    e.target.reset();
+    // Reset form
+    document.getElementById('report-form').reset();
     document.getElementById('image-preview').innerHTML = '';
-    if (marker) marker.setMap(null);
+    document.getElementById('location-text').value = '';
+    document.getElementById('lat').value = '';
+    document.getElementById('lng').value = '';
+    initFallbackMap(); // Reset map
+    
+    alert('✅ Report submitted successfully!');
     loadUserReports();
     
+    // Update admin dashboard if admin is viewing
     if (currentUser.role === 'admin') {
         loadAdminDashboard();
     }
@@ -178,9 +211,14 @@ function loadUserReports() {
     const userReports = reports.filter(r => r.userId === currentUser.email);
     const container = document.getElementById('user-reports-list');
     
+    if (userReports.length === 0) {
+        container.innerHTML = '<p style="text-align:center; color:#666; padding:40px;">No reports yet. Submit your first one! 🚀</p>';
+        return;
+    }
+    
     container.innerHTML = userReports.map(report => `
         <div class="report-card">
-            ${report.image ? `<img src="${report.image}" alt="Garbage" class="report-image" onclick="openModal('${report.image}')">` : ''}
+            ${report.image ? `<img src="${report.image}" alt="Garbage" class="report-image" onclick="openModal('${report.image}')">` : '<div class="report-image" style="background:#f0f0f0; display:flex; align-items:center; justify-content:center; color:#999;">📷</div>'}
             <div class="report-content">
                 <div class="report-title">${report.description.substring(0, 50)}${report.description.length > 50 ? '...' : ''}</div>
                 <div class="report-location">
@@ -195,10 +233,10 @@ function loadUserReports() {
     `).join('');
 }
 
+// Admin functions (unchanged but fixed)
 function loadAdminDashboard() {
     const reports = JSON.parse(localStorage.getItem('reports') || '[]');
     
-    // Update stats
     document.getElementById('total-reports').textContent = reports.length;
     document.getElementById('pending-reports').textContent = reports.filter(r => r.status === 'pending').length;
     document.getElementById('in-progress-reports').textContent = reports.filter(r => r.status === 'in-progress').length;
@@ -211,7 +249,7 @@ function renderAdminReports(reports) {
     const container = document.getElementById('admin-reports-list');
     container.innerHTML = reports.map(report => `
         <div class="report-card" data-id="${report.id}">
-            ${report.image ? `<img src="${report.image}" alt="Garbage" class="report-image" onclick="openModal('${report.image}')">` : ''}
+            ${report.image ? `<img src="${report.image}" alt="Garbage" class="report-image" onclick="openModal('${report.image}')">` : '<div class="report-image" style="background:#f0f0f0; display:flex; align-items:center; justify-content:center; color:#999;">📷</div>'}
             <div class="report-content">
                 <div class="report-title">${report.description}</div>
                 <div class="report-location">
@@ -235,18 +273,15 @@ function renderAdminReports(reports) {
 
 function updateStatus(reportId, status) {
     const reports = JSON.parse(localStorage.getItem('reports') || '[]');
-    const report = reports.find(r => r.id === reportId);
-    if (report) {
-        report.status = status;
-        report.updatedAt = new Date().toISOString();
+    const reportIndex = reports.findIndex(r => r.id === reportId);
+    if (reportIndex !== -1) {
+        reports[reportIndex].status = status;
+        reports[reportIndex].updatedAt = new Date().toISOString();
         localStorage.setItem('reports', JSON.stringify(reports));
         loadAdminDashboard();
-        alert(`Report marked as ${status.replace('-', ' ')}`);
+        alert(`✅ Report marked as ${status.replace('-', ' ')}`);
     }
 }
-
-let searchTerm = '';
-let filterStatus = '';
 
 function filterReports() {
     searchTerm = document.getElementById('search-reports').value.toLowerCase();
@@ -272,7 +307,6 @@ function closeModal() {
     document.getElementById('image-modal').style.display = 'none';
 }
 
-// Close modal on outside click
 window.onclick = function(event) {
     const modal = document.getElementById('image-modal');
     if (event.target === modal) {
